@@ -32,6 +32,7 @@ export default {
   templates: () => http.get('/api/settings/templates'),
   createTemplate: d => http.post('/api/settings/templates', d),
   updateTemplate: (id, d) => http.put(`/api/settings/templates/${id}`, d),
+  deleteTemplate: id => http.delete(`/api/settings/templates/${id}`),
   schedule: () => http.get('/api/settings/schedule'),
   updateSchedule: d => http.put('/api/settings/schedule', d),
   family: () => http.get('/api/settings/family'),
