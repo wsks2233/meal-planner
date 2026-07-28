@@ -214,6 +214,7 @@ def confirm_plan(plan_id: int, db: Session = Depends(get_db)):
     # 缺量 → 采购清单
     if plan.mode == "long_term":
         for item in batch_shopping_plan(db, plan, plan.meals[0].servings if plan.meals else 3):
+            item.pop("storage_method", None)  # 展示字段，非落库字段
             db.add(models.ShoppingItem(plan_id=plan.id, **item))
     else:
         for ing_id, qty in shortages.items():

@@ -1,0 +1,40 @@
+:root {
+  --brand: #07c160;
+}
+body {
+  margin: 0;
+  background: #f7f8fa;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC',
+    'Helvetica Neue', 'Microsoft YaHei', sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+.page {
+  padding: 12px 12px calc(66px + env(safe-area-inset-bottom));
+  max-width: 720px;   /* 桌面端居中，共用同一套自适应布局 */
+  margin: 0 auto;
+}
+.card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+.card-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.muted { color: #969799; font-size: 12px; }
+.up { color: #ee0a24; }    /* 中国习惯：涨=红 */
+.down { color: #07c160; }  /* 跌=绿 */
+
+/* 采购清单打印样式：浏览器"打印/另存为 PDF"即可带去超市 */
+@media print {
+  .van-tabbar, .no-print, .van-nav-bar { display: none !important; }
+  .page { padding: 0; max-width: none; }
+  .card { box-shadow: none; border: 1px solid #eee; }
+}
