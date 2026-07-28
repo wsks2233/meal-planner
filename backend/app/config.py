@@ -8,9 +8,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # 例: postgresql+psycopg2://meal:meal@db:5432/meal
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'meal.db'}")
 
-# 上传目录（用户食谱成品图）
-UPLOAD_DIR = BASE_DIR / "uploads"
-UPLOAD_DIR.mkdir(exist_ok=True)
+# 上传目录（用户食谱成品图）。Docker 中建议挂到持久卷，如 /data/uploads
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", str(BASE_DIR / "uploads")))
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # 临期判定阈值：剩余保质期 <= 该天数视为"临期"
 EXPIRING_SOON_DAYS = int(os.getenv("EXPIRING_SOON_DAYS", "3"))

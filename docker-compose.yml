@@ -1,0 +1,39 @@
+services:
+  backend:
+    build: ./backend
+    environment:
+      # 默认使用 SQLite（数据持久化在 meal_data 卷的 /data 目录）
+      - DATABASE_URL=sqlite:////data/meal.db
+      - UPLOAD_DIR=/data/uploads
+      - EXPIRING_SOON_DAYS=3
+    volumes:
+      - meal_data:/data
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    # 如需 PostgreSQL，取消下方 db 服务注释，并将 DATABASE_URL 改为：
+    # postgresql+psycopg2://meal:meal@db:5432/meal
+    # depends_on:
+    #   - db
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # db:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     - POSTGRES_USER=meal
+  #     - POSTGRES_PASSWORD=meal
+  #     - POSTGRES_DB=meal
+  #   volumes:
+  #     - pg_data:/var/lib/postgresql/data
+  #   restart: unless-stopped
+
+volumes:
+  meal_data:
+  # pg_data:

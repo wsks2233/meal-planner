@@ -21,3 +21,9 @@ backend/uploads/
 .idea/
 .vscode/
 .DS_Store
+
+# Workspace memory (agent-internal)
+.workbuddy/
+
+# WorkBuddy workspace memory (local only)
+.workbuddy/
