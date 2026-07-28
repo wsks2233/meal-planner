@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.db
+*.sqlite3
+
+# Node
+node_modules/
+dist/
+dev-dist/
+.vite/
+
+# Uploads / runtime
+backend/uploads/
+*.log
+
+# Env & IDE
+.env
+.idea/
+.vscode/
+.DS_Store
