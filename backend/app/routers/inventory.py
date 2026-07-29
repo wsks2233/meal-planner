@@ -63,6 +63,8 @@ def purchase_in(payload: schemas.BatchIn, db: Session = Depends(get_db)):
 @router.post("/consume")
 def consume(payload: schemas.ConsumeIn, db: Session = Depends(get_db)):
     """"销"：手动记录消耗。"""
+    if payload.qty <= 0:
+        raise HTTPException(400, "消耗数量必须为正数")
     b = db.get(models.InventoryBatch, payload.batch_id)
     if not b:
         raise HTTPException(404, "批次不存在")

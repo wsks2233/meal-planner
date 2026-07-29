@@ -8,12 +8,15 @@
   "模拟数据(演示)"来源，不冒充真实行情。
 - 新增真实数据源时只需继承 PriceSourceAdapter 并实现 fetch()。
 """
+import logging
 import math
 import random
 import time
 from abc import ABC, abstractmethod
 from datetime import date
 from functools import wraps
+
+log = logging.getLogger("price_engine")
 
 
 def retry(times: int = 3, delay: float = 1.0):
@@ -78,6 +81,66 @@ class MockPriceSource(PriceSourceAdapter):
         return {i.id: self.price_for(i.base_price, i.id, day) for i in ingredients}
 
 
+class CompositePriceSource(PriceSourceAdapter):
+    """多源降级聚合：按优先级串联多个 PriceSourceAdapter。
+
+    - 每个食材取「第一个返回非空价」的源；记录 last_sources / last_specs 供写库标注。
+    - 不在链中放入 Mock：既匹配不到政府价、也匹配不到电商价的食材，视为
+      「暂无可靠价」，由上层灰标处理，绝不用模拟价冒充真实行情（合规要求）。
+    - 任一源异常（网络/反爬/超时）自动跳过并降级到下一源，不阻断主流程。
+    """
+
+    source_name = "复合价格源"
+
+    def __init__(self, sources: list):
+        self.sources = sources
+        self.last_sources: dict[int, str] = {}
+        self.last_specs: dict[int, str] = {}
+
+    @staticmethod
+    def _spec_for(source_name: str) -> str:
+        return "元/500克" if source_name == "政府指导价" else "参考价(电商)"
+
+    def fetch(self, ingredients: list, day: date) -> dict[int, float]:
+        result: dict[int, float] = {}
+        self.last_sources = {}
+        self.last_specs = {}
+        remaining = list(ingredients)
+        for src in self.sources:
+            if not remaining:
+                break
+            try:
+                prices = src.fetch(remaining, day) or {}
+            except Exception as e:  # noqa: BLE001
+                log.warning("%s 抓取失败，降级下一源: %s", getattr(src, "source_name", src), e)
+                continue
+            for iid, price in prices.items():
+                if price is not None and iid not in result:
+                    result[iid] = price
+                    self.last_sources[iid] = src.source_name
+                    self.last_specs[iid] = self._spec_for(src.source_name)
+            remaining = [ing for ing in remaining if ing.id not in result]
+        return result
+
+
 def get_price_source() -> PriceSourceAdapter:
-    """工厂：未来可根据环境变量切换真实数据源，失败自动降级 Mock。"""
-    return MockPriceSource()
+    """工厂：默认复合源（政府真实价 ∪ 电商平台兜底）。
+
+    任一源初始化失败均自动跳过（政府价与电商互不影响），全部失败才退回 Mock，
+    保证系统始终有价可用、且优先使用真实数据。
+    """
+    sources: list = []
+    try:
+        from .gov_price_source import GovPriceSource
+        sources.append(GovPriceSource())
+    except Exception as e:  # noqa: BLE001
+        log.warning("政府价源初始化失败: %s", e)
+    try:
+        from .ecommerce_source import EcommercePriceSource
+        sources.append(EcommercePriceSource())
+    except Exception as e:  # noqa: BLE001
+        log.warning("电商价格源初始化失败，跳过: %s", e)
+    if not sources:
+        log.warning("无可用真实价格源，退回 MockPriceSource")
+        return MockPriceSource()
+    return CompositePriceSource(sources)
