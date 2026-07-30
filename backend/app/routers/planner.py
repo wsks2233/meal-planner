@@ -9,7 +9,7 @@ from ..database import get_db
 from .. import models, schemas
 from ..services import recommender
 from ..services.long_term import batch_shopping_plan
-from ..services.pricing import latest_price_map, price_per_g
+from ..services.pricing import latest_price_map, cost_per_g
 
 router = APIRouter(prefix="/api/plans", tags=["plans"])
 
@@ -234,7 +234,8 @@ def confirm_plan(plan_id: int, db: Session = Depends(get_db)):
             if not ing:
                 continue
             rec = latest.get(ing_id)
-            per_g = price_per_g(rec.price, rec.spec) if rec else ing.base_price / 500.0
+            # 缺量估价同走成本护栏：只信任政府指导价，电商整件价/base_price 兜底
+            per_g = cost_per_g(rec, ing.base_price)
             db.add(models.ShoppingItem(
                 plan_id=plan.id, ingredient_id=ing_id, need_qty=round(qty, 0),
                 unit=ing.unit, est_price=round(qty * per_g, 2),

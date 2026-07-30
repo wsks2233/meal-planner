@@ -18,7 +18,7 @@ from sqlalchemy import select  # noqa: E402
 from app.database import Base, engine, SessionLocal  # noqa: E402
 from app import models  # noqa: E402
 from app.routers import planner  # noqa: E402
-from app.services.pricing import price_per_g, latest_price_map  # noqa: E402
+from app.services.pricing import price_per_g, cost_per_g, latest_price_map  # noqa: E402
 
 
 def main():
@@ -30,6 +30,24 @@ def main():
     assert abs(price_per_g(5, "参考价(电商)") - 0.01) < 1e-9  # 无规格按 500g
     assert abs(price_per_g(0.05, "元/克") - 0.05) < 1e-9
     print("[OK] price_per_g 单位归一正确")
+
+    # ---- 成本护栏：电商「整件/打包参考价」不进成本，回退 base_price ----
+    _gov = models.PriceRecord(ingredient_id=1, price=20.0, spec="元/千克",
+                              date=date.today(), source="政府指导价")
+    _ecom = models.PriceRecord(ingredient_id=2, price=2327.3, spec="参考价(电商)",
+                               date=date.today(), source="电商平台参考价")
+    assert abs(cost_per_g(_gov, 10.0) - 0.02) < 1e-9, "政府价 20元/kg 应=0.02元/g"
+    assert abs(cost_per_g(_ecom, 5.0) - 0.01) < 1e-9, \
+        "电商 2327 元整件价应被忽略，回退 base_price 5/500=0.01"
+    assert abs(cost_per_g(None, 5.0) - 0.01) < 1e-9, "无记录回退 base_price"
+    print("[OK] cost_per_g 成本护栏：只信政府价，电商整件价不进成本")
+
+    # ---- 电商克重归一化后进成本 ----
+    _ecom_norm = models.PriceRecord(ingredient_id=3, price=42.0, spec="元/500克",
+                                    date=date.today(), source="电商平台参考价")
+    assert abs(cost_per_g(_ecom_norm, 5.0) - 0.084) < 1e-6, \
+        "电商归一化 42元/500克=0.084元/g（规格含'500克'→可信）"
+    print("[OK] cost_per_g 电商归一化后进成本")
 
     # ---- 集成：confirm_plan 扣库存 + 缺量估价 ----
     Base.metadata.drop_all(bind=engine)

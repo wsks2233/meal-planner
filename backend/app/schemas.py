@@ -37,6 +37,12 @@ class PriceTrendOut(BaseModel):
     source: str
 
 
+class PriceNormalizeIn(BaseModel):
+    """手动修正价格单位：用户输入克重描述。"""
+    raw_weight: str = Field(..., min_length=1, max_length=80,
+                            description="重量描述，如 5kg、500g、1斤、2.5千克")
+
+
 # ---------- 食谱 ----------
 class RecipeItemIn(BaseModel):
     ingredient_id: int

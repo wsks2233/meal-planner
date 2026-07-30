@@ -8,15 +8,43 @@
   数据口径：本项目食材单位均为 g/ml（液体按 1ml≈1g 近似），价格常见规格为
   「元/500克」「元/kg」「元/斤」「参考价(电商)」等。
 """
+import re
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import models
 
 MOCK_SOURCE = "模拟数据(演示)"
+GOV_SOURCE = "政府指导价"
+ECOM_SOURCE = "电商平台参考价"
 
 # 无价格记录时的兜底单价（base_price 即「元/500g」，折算为元/克）
 DEFAULT_PER_G = 5.0 / 500.0
+
+# 成本/预算计算只信任这些来源（电商参考价是「整件/打包价」，单位不可靠，
+# 直接进成本会把预算算爆 —— 实测慢慢买「小米=2327元」。故电商价仅展示、不进成本）。
+# 但若电商源成功从商品标题解析出克重并归一化为「元/500克」，
+# 规格即含明确单位 → 纳入成本。
+COST_TRUSTED_SOURCES = {GOV_SOURCE}
+
+
+def _spec_is_normalized(spec: str | None) -> bool:
+    """规格是否含明确计价单位（元/500克 · 元/kg · 元/斤），非模糊「参考价(电商)」。"""
+    s = (spec or "").lower()
+    return any(u in s for u in ("500克", "500g", "/kg", "千克", "公斤", "/斤", "元/克", "元/g"))
+
+
+def cost_per_g(rec: "models.PriceRecord | None", base_price: float) -> float:
+    """成本估算口径单价（元/克）。
+
+    - 政府指导价或已归一化（规格含明确单位）：可信，进成本。
+    - 电商「参考价(电商)」、mock、无记录：回退 base_price 兜底。
+    展示层（/latest）仍可用电商价，仅成本计算走此护栏。
+    """
+    if rec is not None and (rec.source in COST_TRUSTED_SOURCES
+                            or _spec_is_normalized(rec.spec)):
+        return price_per_g(rec.price, rec.spec)
+    return (base_price or 5.0) / 500.0
 
 
 def price_per_g(price: float | None, spec: str | None) -> float:
@@ -55,3 +83,29 @@ def latest_price_map(db: Session) -> dict[int, "models.PriceRecord"]:
         if cur is None or (cur.source == MOCK_SOURCE and r.source != MOCK_SOURCE):
             best[r.ingredient_id] = r
     return best
+
+
+def parse_weight_g(title: str) -> float | None:
+    """从标题/规格描述中提取克重。返回克数；无法解析时返回 None。
+
+    ⚠ 注意：「数字+枚/条/袋/包/箱/L」等非重量单位不会被解析；
+       只有 kg/公斤/斤/克/g 才算。
+    """
+    if not title:
+        return None
+    t = title.lower().replace(" ", "").replace("　", "")
+    # kg / 公斤 / 千克 → ×1000
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(kg|公斤|千克)", t)
+    if m:
+        return float(m.group(1)) * 1000
+    # 斤 → ×500
+    m = re.search(r"(\d+(?:\.\d+)?)\s*斤", t)
+    if m:
+        return float(m.group(1)) * 500
+    # 克 / g（排除 "kg" 末尾的 'g'）
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(?<![k])(克|g)\b", t)
+    if m:
+        val = float(m.group(1))
+        if 0.1 < val < 500000:
+            return val
+    return None

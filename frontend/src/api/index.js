@@ -16,6 +16,7 @@ export default {
   // prices
   latestPrices: () => http.get('/api/prices/latest'),
   priceTrend: (id, days) => http.get(`/api/prices/trend/${id}`, { params: { days } }),
+  normalizePrice: (id, raw_weight) => http.patch(`/api/prices/${id}/normalize`, { raw_weight }),
   // ingredients
   ingredients: params => http.get('/api/ingredients', { params }),
   byBarcode: code => http.get(`/api/ingredients/barcode/${code}`),

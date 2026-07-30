@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import models
 from ..config import OPTIMIZER_ITERATIONS, EXPIRING_SOON_DAYS
-from .pricing import latest_price_map, price_per_g, DEFAULT_PER_G
+from .pricing import latest_price_map, cost_per_g, DEFAULT_PER_G
 
 MEAL_TYPES = ["breakfast", "lunch", "dinner"]
 
@@ -39,15 +39,13 @@ class Ctx:
                  days: int):
         self.people = people
         self.days = days
-        # 最新单价 {ingredient_id: 元/克} —— 单查询取每食材最新价并按规格归一，
-        # 避免「每食材一次查询」的 N+1；无记录时回退 base_price（元/500g -> 元/克）。
+        # 成本单价 {ingredient_id: 元/克} —— 单查询取每食材最新价；成本口径只信任
+        # 政府指导价，电商「整件/打包参考价」单位不可靠、不进成本（缺省回退 base_price）。
         today = date.today()
         latest = latest_price_map(db)
         self.per_g: dict[int, float] = {}
         for ing in db.scalars(select(models.Ingredient)):
-            rec = latest.get(ing.id)
-            self.per_g[ing.id] = (price_per_g(rec.price, rec.spec)
-                                  if rec else ing.base_price / 500.0)
+            self.per_g[ing.id] = cost_per_g(latest.get(ing.id), ing.base_price)
         # 库存（虚拟扣减用的可变副本）与临期集合
         self.inventory: dict[int, float] = defaultdict(float)
         self.expiring: set[int] = set()

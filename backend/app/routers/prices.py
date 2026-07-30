@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import models, schemas
 from ..services.price_engine import CompositePriceSource, get_price_source
+from ..services.pricing import parse_weight_g
 
 router = APIRouter(prefix="/api/prices", tags=["prices"])
 
@@ -55,6 +56,41 @@ def latest_prices(db: Session = Depends(get_db)):
             "source": cur.source, "available": True,
         })
     return out
+
+
+@router.patch("/{ingredient_id}/normalize")
+def normalize_price(ingredient_id: int, payload: schemas.PriceNormalizeIn,
+                    db: Session = Depends(get_db)):
+    """手动修正价格单位：用户提供克重描述（如 5kg/500g/1斤），
+    系统解析克重后将价格归一化为『元/500克』并更新规格。
+    仅对当天记录生效；无记录时 404。
+    """
+    ing = db.get(models.Ingredient, ingredient_id)
+    if not ing:
+        raise HTTPException(404, "食材不存在")
+    today = date.today()
+    rec = db.scalars(
+        select(models.PriceRecord)
+        .where(models.PriceRecord.ingredient_id == ingredient_id,
+               models.PriceRecord.date == today)
+        .limit(1)).first()
+    if not rec:
+        raise HTTPException(404, "今天暂无价格记录")
+    w = parse_weight_g(payload.raw_weight)
+    if w is None:
+        raise HTTPException(400, f"无法从『{payload.raw_weight}』解析克重，请用类似 5kg、500g、1斤 的写法")
+    new_price = round(rec.price / w * 500, 2)
+    old_price, old_spec = rec.price, rec.spec
+    rec.price = new_price
+    rec.spec = "元/500克"
+    db.commit()
+    return {
+        "ok": True,
+        "ingredient_id": ingredient_id,
+        "old_price": old_price, "old_spec": old_spec,
+        "new_price": new_price, "new_spec": "元/500克",
+        "parsed_weight_g": w,
+    }
 
 
 @router.get("/source")

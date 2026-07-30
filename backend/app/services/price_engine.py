@@ -118,7 +118,9 @@ class CompositePriceSource(PriceSourceAdapter):
                 if price is not None and iid not in result:
                     result[iid] = price
                     self.last_sources[iid] = src.source_name
-                    self.last_specs[iid] = self._spec_for(src.source_name)
+                    # 电商源可能已通过克重归一化标记了可信规格（元/500克）
+                    overrides = getattr(src, "_specs_override", {})
+                    self.last_specs[iid] = overrides.get(iid) or self._spec_for(src.source_name)
             remaining = [ing for ing in remaining if ing.id not in result]
         return result
 

@@ -28,6 +28,7 @@ from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 
 from .price_engine import PriceSourceAdapter, retry
+from .pricing import parse_weight_g
 
 log = logging.getLogger("ecommerce_source")
 
@@ -143,6 +144,23 @@ def extract_manmanbuy_price(html: str) -> float | None:
     return _price_in_text(soup.get_text())
 
 
+def extract_manmanbuy_title(html: str) -> str:
+    """从慢慢买搜索结果 HTML 中提取首个商品标题（含克重/规格描述）。"""
+    soup = BeautifulSoup(html, "html.parser")
+    # 优先：类名含 itemTitle/title/name 的 a 标签（常见于商品卡片）
+    for a in soup.find_all("a", class_=re.compile(r"itemTitle|title|item_name", re.I)):
+        t = a.get_text(strip=True)
+        if len(t) >= 3 and len(t) <= 120:
+            return t
+    # 兜底：搜索结果中任意商品卡片内的较长链接文本
+    for card in soup.find_all(class_=re.compile(r"DiscountItem|SearchItem|ItemPC", re.I)):
+        for a in card.find_all("a"):
+            t = a.get_text(strip=True)
+            if len(t) >= 5 and len(t) <= 120:
+                return t
+    return ""
+
+
 class EcommercePriceSource(PriceSourceAdapter):
     """电商兜底价格源：政府价匹配不到的食材在此取价。"""
 
@@ -150,6 +168,7 @@ class EcommercePriceSource(PriceSourceAdapter):
 
     def __init__(self, headless: bool = True):
         self.headless = headless
+        self._specs_override: dict[int, str] = {}  # 食材→规格覆盖（克重归一化后标记）
 
     @retry(times=2, delay=1.5)
     def _quote(self, browser, name: str, site: str) -> float | None:
@@ -181,8 +200,10 @@ class EcommercePriceSource(PriceSourceAdapter):
             page.close()
 
     @retry(times=2, delay=2.0)
-    def _quote_manmanbuy(self, browser, name: str) -> float | None:
-        """慢慢买（s.manmanbuy.com）搜索取价，无登录墙、价格直出。"""
+    def _quote_manmanbuy(self, browser, name: str) -> tuple[float | None, str]:
+        """慢慢买取价 + 页面 HTML，返回 (价格, HTML)。
+        HTML 传给克重解析器，以便归一化为元/500g。
+        """
         from urllib.parse import quote
         url = (
             "https://s.manmanbuy.com/pc/search/result?keyword="
@@ -196,13 +217,14 @@ class EcommercePriceSource(PriceSourceAdapter):
             # 限流/出错页：title 含「访问出错了」，或 URL 落到 error
             if any(k in page.url for k in ("passport", "login", "verify", "risk", "error")):
                 log.warning("manmanbuy %s 落到异常页(%s)，跳过", name, page.url)
-                return None
+                return None, "", ""
             page.wait_for_timeout(2500)  # 等 JS 渲染
             txt = page.inner_text("body") or ""
             if _is_captcha(txt) or any(h in txt for h in RATE_LIMIT_HINTS):
                 log.warning("manmanbuy %s 命中反爬/限流页，跳过", name)
-                return None
-            return extract_manmanbuy_price(page.content())
+                return None, ""
+            html = page.content()
+            return extract_manmanbuy_price(html), html
         finally:
             page.close()
 
@@ -247,18 +269,33 @@ class EcommercePriceSource(PriceSourceAdapter):
                         log.warning("达每日预算上限，其余食材转灰标")
                         break
                     price = None
-                    # 主源：慢慢买；兜底：京东/淘宝
-                    for getter in (self._quote_manmanbuy,
-                                   lambda b, n: self._quote(b, n, "jd"),
-                                   lambda b, n: self._quote(b, n, "taobao")):
-                        try:
-                            price = getter(browser, ing.name)
-                        except Exception as e:  # noqa: BLE001
-                            log.warning("%s 抓取异常: %s", ing.name, e)
-                            price = None
-                        if price is not None:
-                            break
+                    page_html = ""
+                    # 主源：慢慢买（可提取标题克重，归一化后元/500g）
+                    try:
+                        price, page_html = self._quote_manmanbuy(browser, ing.name)
+                    except Exception as e:  # noqa: BLE001
+                        log.warning("manmanbuy %s 抓取异常: %s", ing.name, e)
+                        price = None
+                    # 兜底：京东 / 淘宝（无克重信息，不归一化，仅作粗略参考）
+                    if price is None:
+                        for getter in (lambda b, n: self._quote(b, n, "jd"),
+                                       lambda b, n: self._quote(b, n, "taobao")):
+                            try:
+                                price = getter(browser, ing.name)
+                            except Exception as e:  # noqa: BLE001
+                                log.warning("%s 抓取异常: %s", ing.name, e)
+                                price = None
+                            if price is not None:
+                                break
                     if price is not None:
+                        # 克重归一化：若标题含 kg/斤/克，折算为 元/500g + 标记可信规格
+                        title = extract_manmanbuy_title(page_html) if page_html else ""
+                        w = parse_weight_g(title) if title else None
+                        if w and w > 0:
+                            price = round(price / w * 500, 2)
+                            self._specs_override[ing.id] = "元/500克"
+                            log.debug("manmanbuy %s 克重归一: 标题'%s' %sg → 元/500g=%.2f",
+                                      ing.name, title[:40], w, price)
                         _store_price(ing.name, price)
                         result[ing.id] = price
             finally:

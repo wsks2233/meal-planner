@@ -6,6 +6,7 @@ import sys, types, datetime
 sys.path.insert(0, ".")
 
 from app.services import ecommerce_source as es
+from app.services.pricing import parse_weight_g
 
 
 class _FakeIngredient:
@@ -117,5 +118,17 @@ res2 = src.fetch(ings, datetime.date.today())
 assert res2 == res
 
 es.sync_playwright = _orig_pw  # 还原
+
+# ---- 克重解析 ----
+assert parse_weight_g("金龙鱼大米 5kg") == 5000.0
+assert parse_weight_g("东北珍珠米 10公斤装") == 10000.0
+assert parse_weight_g("特级 大米 2.5kg") == 2500.0
+assert parse_weight_g("面粉 500g") == 500.0
+assert parse_weight_g("小米 500g*2袋") == 500.0  # 取首个数字+克
+assert parse_weight_g("新鲜土鸡蛋 30枚") is None
+assert parse_weight_g("金龙鱼花生油 5L") is None  # L ≠ 重量
+assert parse_weight_g("散装 大葱 1斤") == 500.0
+assert parse_weight_g("") is None
+print("[OK] parse_weight_g 克重解析")
 
 print("ALL ECOMMERCE OFFLINE TESTS PASSED ✅")
