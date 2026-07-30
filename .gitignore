@@ -15,6 +15,13 @@ dev-dist/
 # Uploads / runtime
 backend/uploads/
 *.log
+# 运行时价格缓存（自动生成，非源数据）
+backend/app/data/ecommerce_cache.json
+
+# 本地方位相关源（含真实政府价 URL，绝不入库/上云；本机 docker 仍可用真实价）
+backend/app/services/gov_price_source.py
+backend/app/data/gov_price_alias.json
+backend/tests/test_gov_price_source.py
 
 # Env & IDE
 .env
