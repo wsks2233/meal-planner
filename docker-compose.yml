@@ -9,7 +9,7 @@ services:
     volumes:
       - meal_data:/data
     ports:
-      - "8000:8000"
+      - "8001:8000"
     restart: unless-stopped
     # 如需 PostgreSQL，取消下方 db 服务注释，并将 DATABASE_URL 改为：
     # postgresql+psycopg2://meal:meal@db:5432/meal

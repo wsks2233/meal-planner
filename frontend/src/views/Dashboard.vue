@@ -97,7 +97,7 @@
           </div>
         </van-col>
       </van-row>
-      <div class="muted">数据来源：模拟数据(演示)</div>
+      <div class="muted">数据来源：{{ sourceLabel }}</div>
     </div>
   </div>
 </template>
@@ -111,6 +111,7 @@ import { useAppStore } from '../stores/app'
 const store = useAppStore()
 const d = ref(null)
 const today = ref([])
+const sourceLabel = ref('—')
 const labels = { protein: '蛋白质', carb: '碳水', fat: '脂肪' }
 const mealNames = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐' }
 
@@ -125,6 +126,19 @@ async function load() {
   d.value = await api.dashboard()
   today.value = await api.todayMeals()
   store.refreshBadges()
+  // 动态生成菜价来源说明（不再硬编码"模拟数据"）
+  try {
+    const prices = await api.latestPrices()
+    const total = prices.length
+    const avail = prices.filter(p => p.available).length
+    const gov = prices.filter(p => p.source === '政府指导价').length
+    const ec = prices.filter(p => p.source === '电商平台参考价').length
+    if (avail === 0) sourceLabel.value = '暂无可靠价（数据源异常）'
+    else if (gov + ec === avail) sourceLabel.value = `政府价 ${gov} · 电商 ${ec} 种真实价`
+    else sourceLabel.value = `真实价 ${avail}/${total} 种 · 部分暂无可靠价`
+  } catch {
+    sourceLabel.value = '来源获取失败'
+  }
 }
 
 async function markDone(m) {

@@ -9,7 +9,7 @@
       </van-tabs>
       <!-- ECharts + dataZoom(inside)：手机横滑查看长周期 -->
       <div ref="chartEl" style="width:100%;height:260px;margin-top:8px"></div>
-      <div class="muted">数据来源：{{ source }} · 图表支持双指缩放/横向滑动</div>
+      <div class="muted">数据来源：{{ source || '—' }} · 图表支持双指缩放/横向滑动</div>
     </div>
 
     <div class="card">
@@ -18,12 +18,18 @@
           style="flex:1;margin-left:8px;padding:0" />
       </div>
       <van-cell v-for="p in filtered" :key="p.ingredient_id"
-        :title="`${p.icon} ${p.name}`" :label="`${p.category} · ${p.spec}`"
+        :title="`${p.icon} ${p.name}`"
+        :label="`${p.category} · ${p.spec || '—'}`"
         clickable @click="select(p)">
         <template #value>
-          <b>¥{{ p.price }}</b>
-          <span :class="p.change_7d >= 0 ? 'up' : 'down'" style="font-size:12px;margin-left:6px">
-            {{ p.change_7d >= 0 ? '↑' : '↓' }}{{ Math.abs(p.change_7d) }}%</span>
+          <template v-if="p.available">
+            <b>¥{{ p.price }}</b>
+            <span v-if="p.change_7d != null" :class="p.change_7d >= 0 ? 'up' : 'down'" style="font-size:12px;margin-left:6px">
+              {{ p.change_7d >= 0 ? '↑' : '↓' }}{{ Math.abs(p.change_7d) }}%</span>
+            <span v-else class="muted" style="font-size:12px;margin-left:6px">—</span>
+            <van-tag plain type="primary" style="margin-left:6px;vertical-align:middle">{{ p.source }}</van-tag>
+          </template>
+          <van-tag v-else color="#c8c9cc">暂无可靠价</van-tag>
         </template>
       </van-cell>
     </div>
@@ -47,7 +53,7 @@ const kw = ref('')
 const rangeTab = ref(1)
 const showPicker = ref(false)
 const chartEl = ref(null)
-const source = ref('模拟数据(演示)')
+const source = ref('')
 let chart = null
 
 const filtered = computed(() =>
