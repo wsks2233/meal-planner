@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import models
 from ..config import OPTIMIZER_ITERATIONS, EXPIRING_SOON_DAYS
+from .pricing import latest_price_map, price_per_g, DEFAULT_PER_G
 
 MEAL_TYPES = ["breakfast", "lunch", "dinner"]
 
@@ -38,15 +39,15 @@ class Ctx:
                  days: int):
         self.people = people
         self.days = days
-        # 最新菜价 {ingredient_id: 元/500g}
+        # 最新单价 {ingredient_id: 元/克} —— 单查询取每食材最新价并按规格归一，
+        # 避免「每食材一次查询」的 N+1；无记录时回退 base_price（元/500g -> 元/克）。
         today = date.today()
-        self.prices: dict[int, float] = {}
+        latest = latest_price_map(db)
+        self.per_g: dict[int, float] = {}
         for ing in db.scalars(select(models.Ingredient)):
-            rec = db.scalars(
-                select(models.PriceRecord)
-                .where(models.PriceRecord.ingredient_id == ing.id)
-                .order_by(models.PriceRecord.date.desc()).limit(1)).first()
-            self.prices[ing.id] = rec.price if rec else ing.base_price
+            rec = latest.get(ing.id)
+            self.per_g[ing.id] = (price_per_g(rec.price, rec.spec)
+                                  if rec else ing.base_price / 500.0)
         # 库存（虚拟扣减用的可变副本）与临期集合
         self.inventory: dict[int, float] = defaultdict(float)
         self.expiring: set[int] = set()
@@ -79,13 +80,17 @@ class Ctx:
         }
 
     def meal_cost(self, recipe: models.Recipe, inv: dict[int, float]) -> tuple[float, float]:
-        """返回 (新增采购成本, 消耗临期食材克数)。inv 为虚拟库存（不修改）。"""
+        """返回 (新增采购成本, 消耗临期食材克数)。inv 为虚拟库存（不修改）。
+
+        成本按「元/克」单价计算（buy 为克数），消除过去 buy/500*price 对
+        「元/500g」的硬编码假设，兼容 元/kg、元/斤、电商参考价等规格。
+        """
         cost, expire_used = 0.0, 0.0
         for it in recipe.items:
             need = it.amount * self.people
             have = min(need, inv.get(it.ingredient_id, 0))
             buy = need - have
-            cost += buy / 500 * self.prices.get(it.ingredient_id, 5)
+            cost += buy * self.per_g.get(it.ingredient_id, DEFAULT_PER_G)
             if it.ingredient_id in self.expiring:
                 expire_used += have
         return cost, expire_used

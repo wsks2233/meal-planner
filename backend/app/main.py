@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .config import UPLOAD_DIR
+from .database import migrate_schema
 from .seed import seed_all
 from .services.scheduler import start_scheduler
 from .routers import (dashboard, ingredients, inventory, nutrition, planner,
@@ -14,6 +15,7 @@ from .routers import (dashboard, ingredients, inventory, nutrition, planner,
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    migrate_schema()    # 幂等迁移：建表 + price_records 唯一索引（先于种子/抓取）
     seed_all()          # 首次启动自动建表 + 种子数据
     start_scheduler()   # 每日菜价定时任务
     yield

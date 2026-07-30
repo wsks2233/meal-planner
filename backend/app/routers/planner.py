@@ -9,6 +9,7 @@ from ..database import get_db
 from .. import models, schemas
 from ..services import recommender
 from ..services.long_term import batch_shopping_plan
+from ..services.pricing import latest_price_map, price_per_g
 
 router = APIRouter(prefix="/api/plans", tags=["plans"])
 
@@ -187,21 +188,30 @@ def confirm_plan(plan_id: int, db: Session = Depends(get_db)):
     if plan.status == "confirmed":
         raise HTTPException(400, "计划已确认过")
 
+    # 预载（消除循环内 N+1）：食谱(含配料)、全部有效批次按食材分组、食材、最新单价
+    recipes = {r.id: r for r in db.scalars(
+        select(models.Recipe).options(selectinload(models.Recipe.items)))}
+    batches_by_ing: dict[int, list[models.InventoryBatch]] = defaultdict(list)
+    for b in db.scalars(
+            select(models.InventoryBatch)
+            .where(models.InventoryBatch.discarded == False,  # noqa: E712
+                   models.InventoryBatch.remaining_qty > 0,
+                   models.InventoryBatch.expire_date >= date.today())
+            .order_by(models.InventoryBatch.expire_date)):
+        batches_by_ing[b.ingredient_id].append(b)
+
     shortages: dict[int, float] = defaultdict(float)
     for pm in plan.meals:
-        recipe = db.get(models.Recipe, pm.recipe_id)
+        recipe = recipes.get(pm.recipe_id)
+        if not recipe:
+            continue
         for it in recipe.items:
             need = it.amount * pm.servings
-            batches = db.scalars(
-                select(models.InventoryBatch)
-                .where(models.InventoryBatch.ingredient_id == it.ingredient_id,
-                       models.InventoryBatch.discarded == False,  # noqa: E712
-                       models.InventoryBatch.remaining_qty > 0,
-                       models.InventoryBatch.expire_date >= date.today())
-                .order_by(models.InventoryBatch.expire_date)).all()
-            for b in batches:
+            for b in batches_by_ing.get(it.ingredient_id, []):
                 if need <= 0:
                     break
+                if b.remaining_qty <= 0:
+                    continue
                 take = min(need, b.remaining_qty)
                 b.remaining_qty -= take
                 need -= take
@@ -217,15 +227,17 @@ def confirm_plan(plan_id: int, db: Session = Depends(get_db)):
             item.pop("storage_method", None)  # 展示字段，非落库字段
             db.add(models.ShoppingItem(plan_id=plan.id, **item))
     else:
+        ingredients = {i.id: i for i in db.scalars(select(models.Ingredient))}
+        latest = latest_price_map(db)  # 单查询取每食材最新价（替代循环内逐食材查询）
         for ing_id, qty in shortages.items():
-            ing = db.get(models.Ingredient, ing_id)
-            latest = db.scalars(select(models.PriceRecord)
-                                .where(models.PriceRecord.ingredient_id == ing_id)
-                                .order_by(models.PriceRecord.date.desc()).limit(1)).first()
-            price = latest.price if latest else ing.base_price
+            ing = ingredients.get(ing_id)
+            if not ing:
+                continue
+            rec = latest.get(ing_id)
+            per_g = price_per_g(rec.price, rec.spec) if rec else ing.base_price / 500.0
             db.add(models.ShoppingItem(
                 plan_id=plan.id, ingredient_id=ing_id, need_qty=round(qty, 0),
-                unit=ing.unit, est_price=round(qty / 500 * price, 2),
+                unit=ing.unit, est_price=round(qty * per_g, 2),
                 suggest_date=plan.start_date))
     plan.status = "confirmed"
     db.commit()

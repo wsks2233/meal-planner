@@ -17,3 +17,26 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def migrate_schema():
+    """轻量幂等迁移：建表 + price_records 唯一索引（先去重再建）。
+
+    启动时调用一次。用原生 SQL 而非模型 __table_args__，以便对既有
+    SQLite 卷 / Postgres 都生效（create_all 不会为已存在的表补约束）。
+    唯一索引固化「同一食材同日同源仅一条」，防止旧 mock 残留或重复写入。
+    """
+    from sqlalchemy import text
+    from . import models  # noqa: F401  确保模型已注册到 metadata
+
+    Base.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        # 1) 去重：同一 (ingredient_id, date, source) 只保留 id 最大的一条
+        conn.execute(text(
+            "DELETE FROM price_records WHERE id NOT IN ("
+            "  SELECT MAX(id) FROM price_records"
+            "  GROUP BY ingredient_id, date, source)"))
+        # 2) 唯一索引（幂等）
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_price_records_iid_date_src"
+            " ON price_records (ingredient_id, date, source)"))

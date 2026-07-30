@@ -8,7 +8,7 @@ import threading
 from datetime import date
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from ..database import SessionLocal
 from .. import models
@@ -17,14 +17,25 @@ from .price_engine import get_price_source
 log = logging.getLogger("scheduler")
 _scheduler: BackgroundScheduler | None = None
 
+_MOCK_SOURCE = "模拟数据(演示)"
+
 
 def fetch_today_prices():
     db = SessionLocal()
     try:
         today = date.today()
-        exists = db.scalars(select(models.PriceRecord)
-                            .where(models.PriceRecord.date == today).limit(1)).first()
-        if exists:
+        # 清理当天残留的「模拟数据(演示)」记录（旧镜像/历史 mock 写入），
+        # 避免遮住本次真实抓取；已存在的真实记录保留（幂等：重启不重复抓）。
+        db.execute(delete(models.PriceRecord)
+                   .where(models.PriceRecord.date == today,
+                          models.PriceRecord.source == _MOCK_SOURCE))
+        db.commit()
+        has_real = db.scalars(
+            select(models.PriceRecord)
+            .where(models.PriceRecord.date == today,
+                   models.PriceRecord.source != _MOCK_SOURCE)
+            .limit(1)).first()
+        if has_real:
             return
         src = get_price_source()
         ingredients = db.scalars(select(models.Ingredient)).all()

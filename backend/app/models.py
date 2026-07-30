@@ -31,7 +31,11 @@ class Ingredient(Base):
 
 
 class PriceRecord(Base):
-    """菜价记录表"""
+    """菜价记录表。
+
+    唯一性由启动迁移在 (ingredient_id, date, source) 上建的唯一索引保证
+    （见 database.migrate_schema），而非模型 __table_args__，以便兼容既有表。
+    """
     __tablename__ = "price_records"
 
     id: Mapped[int] = mapped_column(primary_key=True)
