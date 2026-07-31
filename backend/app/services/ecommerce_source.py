@@ -144,6 +144,24 @@ def extract_manmanbuy_price(html: str) -> float | None:
     return _price_in_text(soup.get_text())
 
 
+# 品类→搜索限定词，避免歧义（如"小米"被搜成手机、"苹果"搜成 Apple 产品）
+_CATEGORY_CTX = {
+    "粮油": "杂粮", "蔬菜": "蔬菜", "肉类": "食材", "水产": "食材",
+    "蛋奶": "食材", "豆制品": "食材", "菌菇": "食材", "调味": "调料",
+    "水果": "水果", "主食": "食材", "副菜": "食材", "主菜": "食材",
+    "汤": "食材", "早餐": "食材", "其他": "食材",
+}
+
+# 食材类商品天价阈值（超过视为搜错品类，如"小米→小米手机 2422 元"）
+_FOOD_MAX_PRICE = 1000.0
+
+
+def _food_search_name(ing) -> str:
+    """为食材加品类限定词，避免歧义搜索。"""
+    ctx = _CATEGORY_CTX.get(getattr(ing, "category", ""), "")
+    return f"{ing.name} {ctx}" if ctx else ing.name
+
+
 def extract_manmanbuy_title(html: str) -> str:
     """从慢慢买搜索结果 HTML 中提取首个商品标题（含克重/规格描述）。"""
     soup = BeautifulSoup(html, "html.parser")
@@ -169,6 +187,7 @@ class EcommercePriceSource(PriceSourceAdapter):
     def __init__(self, headless: bool = True):
         self.headless = headless
         self._specs_override: dict[int, str] = {}  # 食材→规格覆盖（克重归一化后标记）
+        self._source_urls: dict[int, str] = {}      # 食材→慢慢买搜索页 URL
 
     @retry(times=2, delay=1.5)
     def _quote(self, browser, name: str, site: str) -> float | None:
@@ -243,16 +262,18 @@ class EcommercePriceSource(PriceSourceAdapter):
 
     def fetch(self, ingredients: list, day: date) -> dict[int, float]:
         """返回 {ingredient_id: 电商参考价}；取不到的食材不出现（上层灰标）。
-
-        取价顺序：慢慢买(主) → 京东 → 淘宝(兜底)。每次抓取都过 _rate_limit 限流。
         """
+        from urllib.parse import quote
         result: dict[int, float] = {}
         pending = []
         for ing in ingredients:
             cp = _cached_price(ing.name)
-            if cp is not None:
+            if cp is not None and cp <= _FOOD_MAX_PRICE:
+                # 缓存价仍过阈值校验，避免旧镜像写入的天价（如"小米"→手机）长期复用
                 result[ing.id] = cp
             else:
+                if cp is not None:
+                    log.warning("缓存价 %s=¥%.2f 超阈值，转重新抓取(品类限定)", ing.name, cp)
                 pending.append(ing)
         if not pending:
             return result
@@ -270,12 +291,18 @@ class EcommercePriceSource(PriceSourceAdapter):
                         break
                     price = None
                     page_html = ""
-                    # 主源：慢慢买（可提取标题克重，归一化后元/500g）
+                    search_name = _food_search_name(ing)
+                    # 主源：慢慢买（品类限定搜索 + 可提取标题克重，归一化后元/500g）
                     try:
-                        price, page_html = self._quote_manmanbuy(browser, ing.name)
+                        price, page_html = self._quote_manmanbuy(browser, search_name)
                     except Exception as e:  # noqa: BLE001
                         log.warning("manmanbuy %s 抓取异常: %s", ing.name, e)
                         price = None
+                    # 天价过滤：食材价格 > 1000 元几乎必定搜错品类（如"小米"→手机），重试时用更精准的限定词或跳过
+                    if price and price > _FOOD_MAX_PRICE:
+                        log.warning("manmanbuy %s 疑似品类歧义（¥%.2f > %d），标记为不可靠",
+                                    ing.name, price, _FOOD_MAX_PRICE)
+                        price = None  # 天价直接跳过，不进库，前端灰标
                     # 兜底：京东 / 淘宝（无克重信息，不归一化，仅作粗略参考）
                     if price is None:
                         for getter in (lambda b, n: self._quote(b, n, "jd"),
@@ -298,6 +325,11 @@ class EcommercePriceSource(PriceSourceAdapter):
                                       ing.name, title[:40], w, price)
                         _store_price(ing.name, price)
                         result[ing.id] = price
+                        self._source_urls[ing.id] = (
+                            "https://s.manmanbuy.com/pc/search/result?keyword="
+                            + quote(search_name)
+                            + "&btnSearch="
+                            + quote("搜索"))
             finally:
                 browser.close()
         return result

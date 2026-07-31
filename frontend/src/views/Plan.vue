@@ -26,18 +26,22 @@
               {{ fmtDate(day.date) }}
               <span class="muted">{{ weekdayName(day.date) }}</span>
             </div>
-            <van-cell v-for="m in day.meals" :key="m.id" :border="false" style="padding:6px 0"
-              @click="openMeal(m)">
-              <template #title>
-                <van-tag plain type="primary" style="margin-right:6px">{{ mealNames[m.meal_type] }}</van-tag>
-                {{ m.recipe_name }}
-                <span class="muted" v-if="m.cook_minutes"> · {{ m.cook_minutes }}min</span>
-              </template>
-              <template #value>
-                <span class="muted">¥{{ m.est_cost }}</span>
-                <van-icon name="exchange" style="margin-left:8px;color:#1989fa" />
-              </template>
-            </van-cell>
+            <div v-for="(dishes, type) in day.byMeal" :key="type">
+              <van-tag plain type="primary" size="small" style="margin-bottom:4px">{{ mealNames[type] }}
+                <span v-if="type !== 'breakfast'" class="muted">（{{ dishes.length }} 道菜 · 含主食）</span>
+              </van-tag>
+              <van-cell v-for="m in dishes" :key="m.id" :border="false" style="padding:4px 0 4px 16px"
+                @click="openMeal(m)">
+                <template #title>
+                  <span class="muted" v-if="m.cook_minutes">{{ m.cook_minutes }}min </span>
+                  {{ m.recipe_name }}
+                </template>
+                <template #value>
+                  <span class="muted">¥{{ m.est_cost }}</span>
+                  <van-icon name="exchange" style="margin-left:8px;color:#1989fa" />
+                </template>
+              </van-cell>
+            </div>
           </div>
         </van-swipe-item>
       </van-swipe>
@@ -87,8 +91,12 @@ const mealNames = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐' }
 const weeks = computed(() => {
   if (!plan.value) return []
   const byDate = {}
-  for (const m of plan.value.meals) (byDate[m.date] ||= []).push(m)
-  const days = Object.keys(byDate).sort().map(d => ({ date: d, meals: byDate[d] }))
+  for (const m of plan.value.meals) {
+    const day = (byDate[m.date] ||= { date: m.date, meals: [], byMeal: { breakfast: [], lunch: [], dinner: [] } })
+    day.meals.push(m)
+    ;(day.byMeal[m.meal_type] ||= []).push(m)
+  }
+  const days = Object.keys(byDate).sort().map(d => byDate[d])
   const out = []
   for (let i = 0; i < days.length; i += 7) out.push(days.slice(i, i + 7))
   return out

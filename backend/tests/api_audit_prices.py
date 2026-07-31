@@ -98,7 +98,7 @@ def scenario_a_empty():
     check("A2 返回全部食材", len(body) == 3, f"len={len(body)}")
     keyset = keys_of(body[0]) if body else set()
     expected = {"ingredient_id", "name", "icon", "category", "price", "spec",
-                "date", "change_7d", "source", "available"}
+                "date", "change_7d", "source", "available", "source_url"}
     check("A3 字段集合完整", keyset == expected, f"got={sorted(keyset)}")
     all_unavail = all((not it["available"]) and it["source"] == "暂无可靠价"
                       and it["price"] is None and it["change_7d"] is None for it in body)

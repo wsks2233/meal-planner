@@ -23,9 +23,11 @@ def _settings(db: Session) -> models.FamilySettings:
     return s
 
 
-def _schedule_map(db: Session) -> dict[int, dict[str, bool]]:
-    return {r.weekday: {"breakfast": r.breakfast, "lunch": r.lunch, "dinner": r.dinner}
-            for r in db.scalars(select(models.MealSchedule))}
+def _schedule_map(db: Session) -> dict[int, dict]:
+    return {r.weekday: {
+        "breakfast": r.breakfast, "lunch": r.lunch, "dinner": r.dinner,
+        "lunch_courses": r.lunch_courses, "dinner_courses": r.dinner_courses,
+    } for r in db.scalars(select(models.MealSchedule))}
 
 
 def _template(db: Session, template_id: int | None) -> models.NutritionTemplate:
@@ -63,7 +65,13 @@ def generate(payload: schemas.PlanGenerateIn, db: Session = Depends(get_db)):
     days = payload.days if payload.mode == "long_term" else min(payload.days, 7)
     budget = payload.budget or s.weekly_budget / 7 * days
 
+    # 主食配置：找「大米」或其他主食食材，取其最新价
+    staple = db.scalars(
+        select(models.Ingredient).where(models.Ingredient.name.in_(("大米", "面粉", "挂面")))
+    ).first()
+
     all_slots, total_cost = [], 0.0
+    staple_info = {}
     reports, suggestions, feasible = [], [], True
     prev_mains: set[int] = set()
     offset = 0
@@ -75,6 +83,8 @@ def generate(payload: schemas.PlanGenerateIn, db: Session = Depends(get_db)):
             days=seg_days, budget=seg_budget, people=s.people,
             allergies=s.allergies or [], use_inventory=payload.use_inventory,
             template=template, schedule=schedule,
+            staple_per_person_g=s.staple_per_person_g,
+            staple_ingredient_id=staple.id if staple else None,
             prev_week_mains=prev_mains if payload.mode == "long_term" else None)
         if not res["slots"] and not res["feasible"]:
             return schemas.PlanGenerateOut(feasible=False, message=res["message"],
@@ -84,25 +94,29 @@ def generate(payload: schemas.PlanGenerateIn, db: Session = Depends(get_db)):
         total_cost += res["total_cost"]
         all_slots.extend(res["slots"])
         reports.append(res["nutrition_report"])
-        prev_mains = {r.id for (_, _, r, _) in res["slots"] if r.category == "主菜"}
+        if not staple_info:
+            staple_info = res.get("staple", {})
+        # slots: (date, meal_type, course_index, recipe, cost)
+        prev_mains = {r.id for (_, _, _, r, _) in res["slots"] if r.category == "主菜"}
         offset += seg_days
 
     if not feasible:
         return schemas.PlanGenerateOut(
             feasible=False,
-            message=f"当前预算 ¥{budget:.0f} 无法满足营养目标（方案最低需 ¥{total_cost:.0f}）",
+            message=f"当前预算 ¥{budget:.0f} 无法满足��养目标（方案最低需 ¥{total_cost:.0f}）",
             suggestions=suggestions, nutrition_report=reports[0] if reports else {})
 
     plan = models.MealPlan(start_date=payload.start_date, days=days, budget=budget,
                            total_cost=round(total_cost, 2), mode=payload.mode)
     db.add(plan)
     db.flush()
-    for (d, meal, recipe, cost) in all_slots:
+    for (d, meal, _course, recipe, cost) in all_slots:
         db.add(models.PlanMeal(plan_id=plan.id, date=d, meal_type=meal,
                                recipe_id=recipe.id, servings=s.people, est_cost=cost))
     db.commit()
     db.refresh(plan)
     return schemas.PlanGenerateOut(feasible=True, plan=plan_out(plan, db),
+                                   staple=staple_info,
                                    nutrition_report=reports[0] if reports else {})
 
 

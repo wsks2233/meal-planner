@@ -40,3 +40,16 @@ def migrate_schema():
         conn.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_price_records_iid_date_src"
             " ON price_records (ingredient_id, date, source)"))
+    # 3) 新增列（幂等，单独事务避免回滚影响已有约束）
+    for col_sql in [
+        "ALTER TABLE price_records ADD COLUMN source_url VARCHAR(1024)",
+        "ALTER TABLE meal_schedule ADD COLUMN lunch_courses INTEGER DEFAULT 2",
+        "ALTER TABLE meal_schedule ADD COLUMN dinner_courses INTEGER DEFAULT 3",
+        "ALTER TABLE family_settings ADD COLUMN staple_type VARCHAR(20) DEFAULT '米饭'",
+        "ALTER TABLE family_settings ADD COLUMN staple_per_person_g INTEGER DEFAULT 150",
+    ]:
+        try:
+            with engine.begin() as conn2:
+                conn2.execute(text(col_sql))
+        except Exception:  # noqa: BLE001
+            pass

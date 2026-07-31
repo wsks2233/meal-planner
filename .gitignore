@@ -32,5 +32,8 @@ backend/tests/test_gov_price_source.py
 # Workspace memory (agent-internal)
 .workbuddy/
 
+# External recipe dataset (HowToCook upstream repo, not part of this project)
+howtocook/
+
 # WorkBuddy workspace memory (local only)
 .workbuddy/

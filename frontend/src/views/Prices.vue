@@ -18,7 +18,7 @@
       </div>
       <div v-for="p in filtered" :key="p.ingredient_id">
         <van-cell :title="`${p.icon} ${p.name}`"
-          :label="`${p.category} · ${p.spec || '—'}`"
+          :label="`${p.category} · ${p.spec || '—'} · ${p.date || '—'}`"
           clickable @click="toggleExpand(p)">
           <template #value>
             <template v-if="p.available">
@@ -26,17 +26,17 @@
               <span v-if="p.change_7d != null" :class="p.change_7d >= 0 ? 'up' : 'down'" style="font-size:12px;margin-left:6px">
                 {{ p.change_7d >= 0 ? '↑' : '↓' }}{{ Math.abs(p.change_7d) }}%</span>
               <span v-else class="muted" style="font-size:12px;margin-left:6px">—</span>
-              <van-tag plain type="primary" style="margin-left:6px;vertical-align:middle">{{ p.source }}</van-tag>
+              <van-tag :type="sourceTagType(p.source)" plain style="margin-left:6px;vertical-align:middle">{{ p.source }}</van-tag>
             </template>
             <van-tag v-else color="#c8c9cc">暂无可靠价</van-tag>
           </template>
         </van-cell>
 
-        <!-- 展开：数据来源详情 + 修正单位 -->
+        <!-- 展开：数据来源详情 + 原始凭证 + 修正单位 -->
         <div v-if="expanded === p.ingredient_id" class="detail-panel">
           <div class="detail-row">
             <span class="detail-label">来源</span>
-            <span>{{ p.source }}</span>
+            <van-tag :type="sourceTagType(p.source)" size="small" plain>{{ p.source }}</van-tag>
           </div>
           <div class="detail-row">
             <span class="detail-label">规格</span>
@@ -47,8 +47,12 @@
             <span>¥{{ p.price }}</span>
           </div>
           <div class="detail-row">
-            <span class="detail-label">日期</span>
+            <span class="detail-label">采价日期</span>
             <span>{{ p.date || '—' }}</span>
+          </div>
+          <div class="detail-row" v-if="p.source_url">
+            <span class="detail-label">原始凭证</span>
+            <a :href="p.source_url" target="_blank" class="source-link">查看 →</a>
           </div>
 
           <!-- 电商参考价未被归一化 → 允许手动修正单位 -->
@@ -101,6 +105,12 @@ const filtered = computed(() =>
 
 function isNormalized(spec) {
   return spec && spec !== '参考价(电商)' && spec !== '500g' && spec !== '—'
+}
+
+function sourceTagType(source) {
+  if (source === '政府指导价') return 'success'      // 绿色
+  if (source === '电商平台参考价') return 'warning'   // 橙色
+  return 'primary'
 }
 
 function toggleExpand(p) {

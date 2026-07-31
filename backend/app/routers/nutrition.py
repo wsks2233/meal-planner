@@ -66,6 +66,8 @@ def update_schedule(payload: list[schemas.MealScheduleIn], db: Session = Depends
                          .where(models.MealSchedule.weekday == item.weekday)).first()
         if row:
             row.breakfast, row.lunch, row.dinner = item.breakfast, item.lunch, item.dinner
+            row.lunch_courses = item.lunch_courses
+            row.dinner_courses = item.dinner_courses
         else:
             db.add(models.MealSchedule(**item.model_dump()))
     db.commit()

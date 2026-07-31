@@ -96,6 +96,7 @@ class CompositePriceSource(PriceSourceAdapter):
         self.sources = sources
         self.last_sources: dict[int, str] = {}
         self.last_specs: dict[int, str] = {}
+        self.last_source_urls: dict[int, str] = {}
 
     @staticmethod
     def _spec_for(source_name: str) -> str:
@@ -105,6 +106,7 @@ class CompositePriceSource(PriceSourceAdapter):
         result: dict[int, float] = {}
         self.last_sources = {}
         self.last_specs = {}
+        self.last_source_urls = {}
         remaining = list(ingredients)
         for src in self.sources:
             if not remaining:
@@ -121,6 +123,10 @@ class CompositePriceSource(PriceSourceAdapter):
                     # 电商源可能已通过克重归一化标记了可信规格（元/500克）
                     overrides = getattr(src, "_specs_override", {})
                     self.last_specs[iid] = overrides.get(iid) or self._spec_for(src.source_name)
+                    # 价格来源 URL（政府文章页 / 电商搜索页）
+                    urls = getattr(src, "_source_urls", {}) or {}
+                    shared = getattr(src, "_source_url", None)
+                    self.last_source_urls[iid] = urls.get(iid) or shared or None
             remaining = [ing for ing in remaining if ing.id not in result]
         return result
 

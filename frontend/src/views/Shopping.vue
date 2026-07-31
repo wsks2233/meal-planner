@@ -23,7 +23,10 @@
             </span>
           </template>
           <template #label>
-            {{ it.need_qty }}{{ it.unit }} · {{ it.storage_method }} · 约 ¥{{ it.est_price }}
+            {{ it.need_qty }}{{ it.unit }} · 约 ¥{{ it.est_price }}
+            <van-tag v-if="priceMap[it.ingredient_id]" :type="sourceTagType(priceMap[it.ingredient_id].source)" plain size="mini" style="margin-left:4px">
+              {{ priceMap[it.ingredient_id].source }} ¥{{ priceMap[it.ingredient_id].price }}
+            </van-tag>
           </template>
           <template #right-icon>
             <van-checkbox :name="it.id" @click.stop="toggle(it)" />
@@ -43,6 +46,19 @@ import { useAppStore } from '../stores/app'
 
 const items = ref([])
 const checked = ref([])
+const prices = ref([])
+
+const priceMap = computed(() => {
+  const m = {}
+  for (const p of prices.value) m[p.ingredient_id] = p
+  return m
+})
+
+function sourceTagType(source) {
+  if (source === '政府指导价') return 'success'
+  if (source === '电商平台参考价') return 'warning'
+  return 'primary'
+}
 
 const groups = computed(() => {
   const by = {}
@@ -59,6 +75,7 @@ const groups = computed(() => {
 async function load() {
   items.value = await api.shopping()
   checked.value = items.value.filter(i => i.bought).map(i => i.id)
+  try { prices.value = await api.latestPrices() } catch {}
 }
 
 async function toggle(it) {

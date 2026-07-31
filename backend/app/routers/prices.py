@@ -41,7 +41,7 @@ def latest_prices(db: Session = Depends(get_db)):
                 "ingredient_id": ing.id, "name": ing.name, "icon": ing.icon,
                 "category": ing.category, "price": None, "spec": None,
                 "date": None, "change_7d": None,
-                "source": "暂无可靠价", "available": False,
+                "source": "暂无可靠价", "available": False, "source_url": None,
             })
             continue
         cur = rows[-1]
@@ -54,6 +54,7 @@ def latest_prices(db: Session = Depends(get_db)):
             "date": cur.date.isoformat(),
             "change_7d": round(change, 1) if change is not None else None,
             "source": cur.source, "available": True,
+            "source_url": cur.source_url,
         })
     return out
 

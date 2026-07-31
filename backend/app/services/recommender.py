@@ -96,9 +96,10 @@ class Ctx:
     def consume(self, recipe: models.Recipe, inv: dict[int, float]):
         for it in recipe.items:
             need = it.amount * self.people
-            take = min(need, inv.get(it.ingredient_id, 0))
-            if take:
-                inv[it.ingredient_id] = inv[it.ingredient_id] - take
+            have = inv.get(it.ingredient_id, 0)
+            take = min(need, have)
+            if take and take > 0:
+                inv[it.ingredient_id] = have - take
 
 
 def _nutrition_of(recipe: models.Recipe, people: int) -> dict:
@@ -128,60 +129,99 @@ def _deviation(total: dict, target: dict) -> float:
 def generate_plan(db: Session, *, start_date: date, days: int, budget: float,
                   people: int, allergies: list[int], use_inventory: bool,
                   template: models.NutritionTemplate,
-                  schedule: dict[int, dict[str, bool]],
-                  prev_week_mains: set[int] | None = None) -> dict:
-    """生成 days 天菜谱。返回 {feasible, slots, total_cost, nutrition_report, suggestions}。
+                  schedule: dict[int, dict],
+                  prev_week_mains: set[int] | None = None,
+                  staple_per_person_g: int = 150,
+                  staple_ingredient_id: int | None = None) -> dict:
+    """生成 days 天菜谱。返回 {feasible, slots, staple, total_cost, nutrition_report, suggestions}。
 
-    slots: [(date, meal_type, recipe, est_cost)]
+    schedule: {weekday: {breakfast:bool, lunch:bool, dinner:bool,
+                         lunch_courses:int, dinner_courses:int}}
+    slots: [(date, meal_type, course_index, recipe, est_cost)]  ← 每餐多道菜
+    staple: {per_meal_cost, per_person_g, ingredient_name}     ← 主食自动计算
     prev_week_mains: 长期模式下上一周主菜集合（用于 70% 轮换约束）。
     """
     ctx = Ctx(db, people, allergies, use_inventory, template, days)
     rng = random.Random(42)
 
-    # 1) 展开餐格（按每周天餐次配置）
-    slots: list[tuple[date, str]] = []
+    # 主食单价（元/克）——从真实价取，兜底 0.01 元/g（5 元/500g 大米）
+    staple_per_g = 0.01
+    staple_name = "米饭"
+    if staple_ingredient_id:
+        si = db.get(models.Ingredient, staple_ingredient_id)
+        if si:
+            staple_per_g = ctx.per_g.get(staple_ingredient_id, si.base_price / 500.0)
+            staple_name = si.name
+
+    # 1) 展开餐格：每餐拆成 courses 道菜格（早餐固定 1 格，午晚餐按配置）
+    course_slots: list[tuple[date, str, int]] = []  # (date, meal_type, course_index)
+    meal_groups: dict[tuple, int] = {}              # (date, meal) → course_count
     for d in range(days):
         day = start_date + timedelta(days=d)
-        conf = schedule.get(day.weekday(), {"breakfast": True, "lunch": True, "dinner": True})
+        conf = schedule.get(day.weekday(), {"breakfast": True, "lunch": True, "dinner": True,
+                                            "lunch_courses": 2, "dinner_courses": 3})
         for m in MEAL_TYPES:
-            if conf.get(m):
-                slots.append((day, m))
-    if not slots:
-        return {"feasible": False, "message": "所有餐次均已关闭，请在设置中开启至少一餐",
-                "slots": [], "total_cost": 0, "suggestions": [], "nutrition_report": {}}
+            if not conf.get(m):
+                continue
+            n = 1 if m == "breakfast" else conf.get(f"{m}_courses", 2 if m == "lunch" else 3)
+            meal_groups[(day, m)] = n
+            for c in range(n):
+                course_slots.append((day, m, c))
 
-    # 2) 贪心构造
-    assign: dict[int, models.Recipe] = {}
-    inv = dict(ctx.inventory)
-    recent: list[models.Recipe] = []  # 近 3 天已选，用于重复惩罚
+    if not course_slots:
+        return {"feasible": False, "message": "所有餐次均已关闭，请在设置中开启至少一餐",
+                "slots": [], "total_cost": 0, "suggestions": [], "nutrition_report": {}, "staple": {}}
+
+    # 2) 贪心构造（每道菜格独立选一道食谱）
+    assign: dict[int, models.Recipe] = {}          # key = course_slots index
+    inv = defaultdict(float, ctx.inventory)
+    recent: list[models.Recipe] = []
     running = {"protein": 0.0, "carb": 0.0, "fat": 0.0, "fiber": 0.0}
     total_cost = 0.0
 
-    for idx, (day, meal) in enumerate(slots):
+    # 主食总成本：每餐 × 人均克数 × 人数 × 主食单价
+    meals_count = len(meal_groups)
+    staple_total = meals_count * staple_per_person_g * people * staple_per_g
+
+    for idx, (day, meal, course) in enumerate(course_slots):
         cands = ctx.candidates.get(meal) or []
+        # 排除主食类食谱（米饭/馒头/面条等自动计算，不参与竞争）
+        cands = [r for r in cands if r.category != "主食"]
         if not cands:
             continue
+
+        # 同一餐内已选菜品的品类（避免午餐三道全是荤）
+        same_meal_cats: set[str] = set()
+        for j in range(idx):
+            pday, pmeal, _ = course_slots[j]
+            if pday == day and pmeal == meal and j in assign:
+                same_meal_cats.add(assign[j].category)
+
         best, best_score = None, -math.inf
         for r in cands:
             cost, exp_used = ctx.meal_cost(r, inv)
             nutri = _nutrition_of(r, people)
-            # 营养缺口贡献：越能填补当前缺口分越高
             gap_gain = sum(
                 min(nutri[k], max(0, ctx.target[k] - running[k])) / ctx.target[k]
                 for k in ctx.target if ctx.target[k] > 0)
-            value = (r.protein_g + r.fiber_g * 2) / (cost + 1)  # 性价比
+            value = (r.protein_g + r.fiber_g * 2) / (cost + 1)
             repeat_pen = sum(1.0 for pr in recent if pr.id == r.id)
             repeat_pen += sum(0.4 for pr in recent
                               for a in pr.items for b in r.items
                               if a.ingredient_id == b.ingredient_id
                               and a.amount >= 80 and b.amount >= 80) / max(len(recent), 1)
             if prev_week_mains and r.category == "主菜" and r.id in prev_week_mains:
-                repeat_pen += 2.0  # 长期模式：抑制与上周主菜重复（70% 轮换）
+                repeat_pen += 2.0
+            # 同一餐内品类重复惩罚（如已有荤菜，再选荤菜扣分）
+            cat_pen = 2.0 if r.category in same_meal_cats else 0.0
             score = (W_VALUE * value + W_NUTRI * gap_gain
                      + W_EXPIRE * (exp_used / 500) - W_REPEAT * repeat_pen
-                     + rng.uniform(0, 0.15))
+                     - cat_pen + rng.uniform(0, 0.15))
             if score > best_score:
                 best, best_score = r, score
+
+        if best is None:
+            continue
         assign[idx] = best
         cost, _ = ctx.meal_cost(best, inv)
         total_cost += cost
@@ -190,25 +230,28 @@ def generate_plan(db: Session, *, start_date: date, days: int, budget: float,
         for k in running:
             running[k] += n[k]
         recent.append(best)
-        recent = recent[-9:]  # 约 3 天窗口
+        recent = recent[-9:]
 
-    # 3) 局部随机优化（简化模拟退火：只接受更优解）
+    total_cost += staple_total
+
+    # 3) 局部随机优化
     def evaluate(a: dict) -> tuple[float, float]:
-        inv2 = dict(ctx.inventory)
+        inv2 = defaultdict(float, ctx.inventory)
         c = 0.0
         for i in sorted(a):
             mc, _ = ctx.meal_cost(a[i], inv2)
             c += mc
             ctx.consume(a[i], inv2)
+        c += staple_total
         dev = _deviation(_plan_nutrition(a, people), ctx.target)
         return c, dev
 
     cur_cost, cur_dev = evaluate(assign)
     for _ in range(OPTIMIZER_ITERATIONS):
-        i = rng.randrange(len(slots))
+        i = rng.randrange(len(course_slots))
         if i not in assign:
             continue
-        cands = ctx.candidates.get(slots[i][1]) or []
+        cands = [r for r in (ctx.candidates.get(course_slots[i][1]) or []) if r.category != "主食"]
         if not cands:
             continue
         newr = rng.choice(cands)
@@ -216,10 +259,9 @@ def generate_plan(db: Session, *, start_date: date, days: int, budget: float,
             continue
         old = assign[i]
         assign[i] = newr
-        # 硬性多样性：同一天不出现重复食谱
-        same_day_dup = any(j != i and slots[j][0] == slots[i][0]
+        same_day_dup = any(j != i and course_slots[j][0] == course_slots[i][0]
                            and assign.get(j) and assign[j].id == newr.id
-                           for j in range(len(slots)))
+                           for j in range(len(course_slots)))
         nc, nd = evaluate(assign)
         over_old = max(0, cur_cost - budget)
         over_new = max(0, nc - budget)
@@ -229,7 +271,7 @@ def generate_plan(db: Session, *, start_date: date, days: int, budget: float,
         else:
             assign[i] = old
 
-    # 4) 可行性判定与建议
+    # 4) 可行性
     feasible = cur_cost <= budget
     suggestions = []
     if not feasible:
@@ -249,16 +291,24 @@ def generate_plan(db: Session, *, start_date: date, days: int, budget: float,
             for k in ctx.target if ctx.target[k] > 0},
     }
 
-    # 5) 输出每格成本（重放一次得到逐餐成本）
-    inv3 = dict(ctx.inventory)
+    # 5) 输出：每格成本 + 主食信息
+    inv3 = defaultdict(float, ctx.inventory)
     out_slots = []
     for i in sorted(assign):
         r = assign[i]
         mc, _ = ctx.meal_cost(r, inv3)
         ctx.consume(r, inv3)
-        out_slots.append((slots[i][0], slots[i][1], r, round(mc, 2)))
+        out_slots.append((*course_slots[i][:2], course_slots[i][2], r, round(mc, 2)))
+
+    staple_info = {
+        "total_cost": round(staple_total, 2),
+        "per_person_g": staple_per_person_g,
+        "ingredient_name": staple_name,
+        "per_meal": f"{staple_per_person_g}g × {people}人 = {staple_per_person_g * people}g",
+    }
 
     return {"feasible": feasible, "slots": out_slots, "total_cost": round(cur_cost, 2),
+            "staple": staple_info,
             "nutrition_report": report, "suggestions": suggestions,
             "message": "" if feasible else
             f"当前预算 ¥{budget:.0f} 无法满足营养目标（最优方案需 ¥{cur_cost:.0f}）"}

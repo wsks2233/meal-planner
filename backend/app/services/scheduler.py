@@ -20,10 +20,39 @@ _scheduler: BackgroundScheduler | None = None
 _MOCK_SOURCE = "模拟数据(演示)"
 
 
+def prune_bad_prices():
+    """清理历史遗留的天价电商记录（>阈值，多为品类歧义搜错，如"小米"→手机）。
+
+    自愈机制：每次抓取前执行，删除 source=电商平台参考价 且 price>阈值的脏数据，
+    避免旧镜像写入的异常价长期霸占「最新价」被前端展示。阈值与 ecommerce_source 一致。
+    """
+    db = SessionLocal()
+    try:
+        from .ecommerce_source import _FOOD_MAX_PRICE
+        bad = db.scalars(
+            select(models.PriceRecord)
+            .where(models.PriceRecord.source == "电商平台参考价",
+                   models.PriceRecord.price > _FOOD_MAX_PRICE)
+        ).all()
+        if bad:
+            bad_ids = [r.id for r in bad]
+            db.execute(delete(models.PriceRecord).where(models.PriceRecord.id.in_(bad_ids)))
+            db.commit()
+            log.warning("prune_bad_prices 清理 %d 条天价电商记录: %s",
+                        len(bad), [(r.ingredient_id, r.price) for r in bad])
+    except Exception:  # noqa: BLE001
+        log.exception("prune_bad_prices failed")
+        db.rollback()
+    finally:
+        db.close()
+
+
 def fetch_today_prices():
     db = SessionLocal()
     try:
         today = date.today()
+        # 自愈：先清掉历史遗留的天价异常电商记录（如搜错品类的手机价）
+        prune_bad_prices()
         # 清理当天残留的「模拟数据(演示)」记录（旧镜像/历史 mock 写入），
         # 避免遮住本次真实抓取；已存在的真实记录保留（幂等：重启不重复抓）。
         db.execute(delete(models.PriceRecord)
@@ -43,6 +72,7 @@ def fetch_today_prices():
         prices = src.fetch(ingredients, today) or {}
         sources = getattr(src, "last_sources", {}) or {}
         specs = getattr(src, "last_specs", {}) or {}
+        source_urls = getattr(src, "last_source_urls", {}) or {}
         for ing in ingredients:
             pid = ing.id
             if pid not in prices:
@@ -51,7 +81,8 @@ def fetch_today_prices():
             db.add(models.PriceRecord(
                 ingredient_id=pid, price=prices[pid],
                 spec=specs.get(pid, "元/500克"),
-                date=today, source=sources.get(pid, src.source_name)))
+                date=today, source=sources.get(pid, src.source_name),
+                source_url=source_urls.get(pid)))
         db.commit()
         log.info("Fetched %d prices for %s (of %d ingredients)", len(prices), today, len(ingredients))
     except Exception:  # noqa: BLE001

@@ -44,7 +44,8 @@ class PriceRecord(Base):
     spec: Mapped[str] = mapped_column(String(20), default="500g")
     date: Mapped[date] = mapped_column(Date, index=True)
     source: Mapped[str] = mapped_column(String(50), default="模拟数据(演示)")
-
+    source_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # 价格原始凭证/商品链接（政府为文章页 URL，电商为搜索页 URL）
     ingredient = relationship("Ingredient", back_populates="prices")
 
 
@@ -101,7 +102,7 @@ class NutritionTemplate(Base):
 
 
 class MealSchedule(Base):
-    """每周天餐次开关（周一~周日各自独立配置）"""
+    """每周天餐次开关 + 每餐菜数（周一~周日各自独立配置）"""
     __tablename__ = "meal_schedule"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -109,6 +110,8 @@ class MealSchedule(Base):
     breakfast: Mapped[bool] = mapped_column(Boolean, default=True)
     lunch: Mapped[bool] = mapped_column(Boolean, default=True)
     dinner: Mapped[bool] = mapped_column(Boolean, default=True)
+    lunch_courses: Mapped[int] = mapped_column(Integer, default=2)   # 午餐几道菜（1~4）
+    dinner_courses: Mapped[int] = mapped_column(Integer, default=3)  # 晚餐几道菜（1~4）
 
 
 class FamilySettings(Base):
@@ -118,8 +121,10 @@ class FamilySettings(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     people: Mapped[int] = mapped_column(Integer, default=3)
     weekly_budget: Mapped[float] = mapped_column(Float, default=500)
-    allergies: Mapped[list] = mapped_column(JSON, default=list)  # 忌口/过敏食材 id 列表
+    allergies: Mapped[list] = mapped_column(JSON, default=list)
     notify_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    staple_type: Mapped[str] = mapped_column(String(20), default="米饭")     # 米饭/馒头/面条
+    staple_per_person_g: Mapped[int] = mapped_column(Integer, default=150)   # 人均克数
 
 
 class MealPlan(Base):

@@ -116,6 +116,8 @@ class MealScheduleIn(BaseModel):
     breakfast: bool = True
     lunch: bool = True
     dinner: bool = True
+    lunch_courses: int = Field(default=2, ge=1, le=4)
+    dinner_courses: int = Field(default=3, ge=1, le=4)
 
 
 class MealScheduleOut(MealScheduleIn, ORM):
@@ -127,6 +129,8 @@ class FamilySettingsIn(BaseModel):
     weekly_budget: float = 500
     allergies: list[int] = []
     notify_enabled: bool = False
+    staple_type: str = "米饭"
+    staple_per_person_g: int = Field(default=150, ge=50, le=500)
 
 
 class FamilySettingsOut(FamilySettingsIn, ORM):
@@ -171,8 +175,9 @@ class PlanGenerateOut(BaseModel):
     feasible: bool
     plan: PlanOut | None = None
     message: str = ""
-    suggestions: list[str] = []      # 预算不可行时的放宽建议
+    suggestions: list[str] = []
     nutrition_report: dict = {}
+    staple: dict = {}              # 主食信息：{total_cost, per_person_g, ingredient_name}
 
 
 class ReplaceOut(BaseModel):
