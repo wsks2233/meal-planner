@@ -47,6 +47,7 @@ def migrate_schema():
         "ALTER TABLE meal_schedule ADD COLUMN dinner_courses INTEGER DEFAULT 3",
         "ALTER TABLE family_settings ADD COLUMN staple_type VARCHAR(20) DEFAULT '米饭'",
         "ALTER TABLE family_settings ADD COLUMN staple_per_person_g INTEGER DEFAULT 150",
+        "ALTER TABLE recipes ADD COLUMN prep_ahead_hours INTEGER DEFAULT 0",
     ]:
         try:
             with engine.begin() as conn2:

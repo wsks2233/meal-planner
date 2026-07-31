@@ -71,6 +71,7 @@ class RecipeIn(BaseModel):
     fiber_g: float = 0
     tags: list[str] = []
     note: str | None = None
+    prep_ahead_hours: int = 0
     items: list[RecipeItemIn] = []
 
 
@@ -89,6 +90,7 @@ class RecipeOut(ORM):
     fiber_g: float
     tags: list
     is_builtin: bool
+    prep_ahead_hours: int = 0
     note: str | None = None
 
 
@@ -158,6 +160,7 @@ class PlanMealOut(ORM):
     recipe_name: str | None = None
     cook_minutes: int | None = None
     image_url: str | None = None
+    prep_ahead_hours: int | None = None
 
 
 class PlanOut(ORM):

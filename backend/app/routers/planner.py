@@ -49,6 +49,7 @@ def plan_out(plan: models.MealPlan, db: Session) -> schemas.PlanOut:
             metas[pm.recipe_id] = db.get(models.Recipe, pm.recipe_id)
         r = metas[pm.recipe_id]
         po.recipe_name, po.cook_minutes, po.image_url = r.name, r.cook_minutes, r.image_url
+        po.prep_ahead_hours = r.prep_ahead_hours
     return out
 
 

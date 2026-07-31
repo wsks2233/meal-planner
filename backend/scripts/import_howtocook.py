@@ -41,6 +41,20 @@ def _norm(name: str) -> str:
     return name.replace(" ", "").lower()
 
 
+def _prep_hours_from_steps(steps):
+    """根据步骤文本推算需提前几小时备菜（腌制/泡发/发酵/过夜）。0=即做。"""
+    text = " ".join(steps or [])
+    if any(k in text for k in ("过夜", "隔夜", "一夜", "冷藏一夜", "腌制一夜", "泡一夜", "浸泡过夜")):
+        return 12
+    if any(k in text for k in ("腌制", "腌渍", "腌入味", "抓腌", "腌一下", "腌制备")):
+        return 4
+    if any(k in text for k in ("泡发", "泡一", "泡开", "泡软", "浸泡", "发木耳", "发香菇", "发泡", "冷水泡")):
+        return 4
+    if any(k in text for k in ("发酵", "醒发", "醒面", "饧", "揉匀醒", "二次发酵", "冷藏发酵")):
+        return 2
+    return 0
+
+
 def _list_repo_md(repo_path: str):
     """返回 [(folder, abs_path)]，遍历 dishes 下所有 .md（跳过 template）。"""
     out = []
@@ -165,6 +179,7 @@ def import_repo(repo_path: str, *, category=None, limit=None, dry_run=False):
                 rec.category = r.category
                 rec.meal_types = r.meal_types
                 rec.steps = r.steps
+                rec.prep_ahead_hours = _prep_hours_from_steps(r.steps)
                 rec.cook_minutes = r.cook_minutes or rec.cook_minutes
                 rec.kcal = kcal
                 rec.tags = [f"难度{r.difficulty}", "HowToCook"]
@@ -176,7 +191,8 @@ def import_repo(repo_path: str, *, category=None, limit=None, dry_run=False):
             else:
                 rec = models.Recipe(
                     name=r.name, category=r.category, meal_types=r.meal_types,
-                    steps=r.steps, cook_minutes=r.cook_minutes or 30,
+                    steps=r.steps, prep_ahead_hours=_prep_hours_from_steps(r.steps),
+                    cook_minutes=r.cook_minutes or 30,
                     kcal=kcal, tags=[f"难度{r.difficulty}", "HowToCook"], note=r.note,
                     is_builtin=True,
                 )

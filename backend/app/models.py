@@ -67,6 +67,8 @@ class Recipe(Base):
     kcal: Mapped[float] = mapped_column(Float, default=0)
     fiber_g: Mapped[float] = mapped_column(Float, default=0)
     tags: Mapped[list] = mapped_column(JSON, default=list)
+    # 需提前几小时备菜（腌制/泡发/发酵/过夜等），0 = 即做即食
+    prep_ahead_hours: Mapped[int] = mapped_column(Integer, default=0)
     is_builtin: Mapped[bool] = mapped_column(Boolean, default=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
