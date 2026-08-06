@@ -9,6 +9,7 @@
 {"name":"土豆","category":"蔬菜","unit":"g","icon":"🥔","shelf_life":30,"storage":"常温","protein":2.0,"carb":17.2,"fat":0.2,"base_price":2.2},
 {"name":"面包","category":"粮油","unit":"g","icon":"🍞","shelf_life":5,"storage":"常温","protein":8.3,"carb":58.6,"fat":5.1,"base_price":8.0},
 {"name":"玉米","category":"蔬菜","unit":"g","icon":"🌽","shelf_life":7,"storage":"冷藏","protein":4.0,"carb":22.8,"fat":1.2,"base_price":3.5},
+{"name":"豆角","category":"蔬菜","unit":"g","icon":"🫛","shelf_life":7,"storage":"冷藏","protein":2.0,"carb":7.4,"fat":0.4,"base_price":6.0},
 {"name":"猪五花肉","category":"肉类","unit":"g","icon":"🥩","shelf_life":3,"storage":"冷藏","protein":13.6,"carb":2.2,"fat":30.6,"base_price":14.0},
 {"name":"猪里脊","category":"肉类","unit":"g","icon":"🥩","shelf_life":3,"storage":"冷藏","protein":20.2,"carb":1.5,"fat":7.9,"base_price":16.0},
 {"name":"猪排骨","category":"肉类","unit":"g","icon":"🍖","shelf_life":3,"storage":"冷藏","protein":16.7,"carb":0.7,"fat":20.4,"base_price":22.0},

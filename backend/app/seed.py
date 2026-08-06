@@ -1,4 +1,4 @@
-"""种子数据：食材、食谱、菜价历史回填、默认设置、演示库存。"""
+"""种子数据：食材、默认设置、演示库存（食谱仅来自 HowToCook 导入，菜价从启动日起真实记录）。"""
 import json
 import random
 from datetime import date, timedelta
@@ -7,8 +7,6 @@ from pathlib import Path
 from sqlalchemy import select, func
 from .database import SessionLocal, engine, Base
 from . import models
-from .config import PRICE_BACKFILL_DAYS
-from .services.price_engine import MockPriceSource
 
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -35,32 +33,13 @@ def seed_all():
         db.flush()
 
         # ---- 食谱 ----
-        rraw = json.loads((DATA_DIR / "recipes.json").read_text(encoding="utf-8"))
-        for r in rraw:
-            rec = models.Recipe(
-                name=r["name"], category=r["category"], meal_types=r["meal_types"],
-                steps=r["steps"], cook_minutes=r["cook"],
-                protein_g=r["protein"], carb_g=r["carb"], fat_g=r["fat"],
-                kcal=r["kcal"], fiber_g=r["fiber"], tags=r["tags"], is_builtin=True,
-                image_url=f"/placeholder/{r['name']}.jpg",  # 图片占位符
-            )
-            db.add(rec)
-            db.flush()
-            for name, amount in r["items"]:
-                ing = name2ing[name]
-                db.add(models.RecipeIngredient(
-                    recipe_id=rec.id, ingredient_id=ing.id, amount=amount, unit=ing.unit))
+        # 内置食谱(recipes.json)已取消：经用户确认，内置菜谱数据不准确，
+        # 一切以第三方 HowToCook 导入为准。fresh 安装后需手动执行
+        # scripts/import_howtocook.py 生成食谱，本函数不再写入任何 Recipe。
 
-        # ---- 菜价历史回填（模拟引擎，90 天） ----
-        src = MockPriceSource()
-        today = date.today()
-        for ing in name2ing.values():
-            for d in range(PRICE_BACKFILL_DAYS, -1, -1):
-                day = today - timedelta(days=d)
-                db.add(models.PriceRecord(
-                    ingredient_id=ing.id, price=src.price_for(ing.base_price, ing.id, day),
-                    spec=f"500{ing.unit}" if ing.unit != "个" else "1个",
-                    date=day, source="模拟数据(演示)"))
+        # ---- 菜价 ----
+        # 不预填历史：价格从启动日起由调度器真实抓取记录（fetch_today_prices）。
+        # 首次启动的后台抓取写入启动当天真实价，之后每周一追加。
 
         # ---- 默认设置 ----
         db.add(models.FamilySettings(people=3, weekly_budget=500, allergies=[]))

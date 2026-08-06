@@ -15,8 +15,5 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 # 临期判定阈值：剩余保质期 <= 该天数视为"临期"
 EXPIRING_SOON_DAYS = int(os.getenv("EXPIRING_SOON_DAYS", "3"))
 
-# 菜价历史回填天数（用于趋势图演示）
-PRICE_BACKFILL_DAYS = int(os.getenv("PRICE_BACKFILL_DAYS", "90"))
-
 # 推荐算法迭代次数（模拟退火简化版）
 OPTIMIZER_ITERATIONS = int(os.getenv("OPTIMIZER_ITERATIONS", "400"))
