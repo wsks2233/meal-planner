@@ -1,6 +1,6 @@
 # 家庭智能膳食管家 — 系统架构设计文档
 
-> 版本: 2.0 | 日期: 2026-07-29 | 作者: 软件架构师
+> 版本: 2.1 | 初版: 2026-07-29 | 刷新: 2026-08-07 | 作者: 软件架构师 / AI 协作重学后校订
 
 ## 1. 系统定位与架构原则
 
@@ -21,7 +21,7 @@
 | **单体优先** | 先单体后微服务——家庭用户规模不需要分布式复杂度 | FastAPI 单体、按领域分路由/服务/模型 |
 | **离线可用** | PWA Service Worker + 核心数据本地缓存 | Workbox NetworkFirst(CacheFirst 静态) |
 | **渐进增强** | 核心链路先跑通，再逐步替换模拟数据源、补充智能化 | PriceEngine: Mock → 政府价 → Ecommerce |
-| **配置驱动** | 环境差异靠环境变量切换，不作代码级判断 | DATABASE_URL, ECOMMERCE_PROXY, PRICE_BACKFILL_DAYS |
+| **配置驱动** | 环境差异靠环境变量切换，不作代码级判断 | DATABASE_URL, ECOMMERCE_PROXY（电商代理）；价格不再预填历史，自启动日起真实记录 |
 | **防御式集成** | 外部依赖失败不影响核心功能 | 每个 PriceSource 失败 → `{}` → 上层灰标兜底 |
 
 ---
@@ -77,7 +77,7 @@
      │                    数据层                                    │
      │  ┌─────────────────┐  ┌────────────┐  ┌─────────────────┐  │
      │  │ SQLAlchemy ORM  │  │ JSON 种子   │  │ 外部 API/爬虫    │  │
-     │  │ 12 模型         │  │ingred/recipes│  │gov.cn（示例）    │  │
+     │  │ 12 模型         │  │ 仅食材JSON种子 │  │gov.cn（示例）    │  │
      │  │ SQLite / PG     │  │alias/cache  │  │manmanbuy.com    │  │
      │  └─────────────────┘  └────────────┘  └─────────────────┘  │
      └─────────────────────────────────────────────────────────────┘
@@ -104,7 +104,7 @@ MockPriceSource   GovPriceSource   EcommercePriceSource
   └── 内置算法       └── httpx+bs4+alias    └── Playwright+bs4+限流
 ```
 
-**路由逻辑** (CompositePriceSource，当前实现待落地 Phase 2)：
+**路由逻辑** (CompositePriceSource，已实现：`get_price_source()` 工厂按源可用性自动选择、失败源静默跳过)：
 
 ```
 对于每种食材：
@@ -191,7 +191,7 @@ ShoppingItem               │                              PriceRecord (趋势)
 
 | 字段 | 用途 | 状态 |
 |------|------|------|
-| `PriceRecord.market_detail` | 当地 8 市场详细价格 | 待加 (Task #12) |
+| `PriceRecord.source_url` | 政府价文章页 / 电商搜索页原始凭证链接，前端可点击核实 | 已实现 ✅ |
 | `Ingredient.barcode` | 真实扫码入库 | 已定义、demo 占位 |
 | `FamilySettings.allergies` | JSON 数组，当前单用户 | 预留家庭成员粒度 |
 | `PlanMeal.done_status` | pending/done/skipped | 已实现 |
@@ -233,17 +233,17 @@ services:
 - [x] PWA + Docker 部署
 - [x] 前端浏览器冒烟测试 11 路由全绿
 
-### Phase 2 — 真实数据源 (进行中 🔄)
+### Phase 2 — 真实数据源 (已完成 ✅)
 - [x] #8–#11 当地发改委价格适配器 (discover + parse + alias)
 - [x] #21 电商兜底 (慢慢买 Playwright 实跑验证 5/5 命中)
-- [ ] #12 PriceRecord.market_detail 列迁移
-- [ ] #14 CompositePriceSource 工厂切换 + 降级链
-- [ ] #15 回填近 1 年历史价
-- [ ] #16 调度改为周更 (每周一 00:10)
-- [ ] #19 /api/prices/latest 周环比 + 真实价标注
-- [ ] #17 /api/prices/source 数据来源接口
-- [ ] #20 前端来源标注 + 均值/明细展开
-- [ ] #18 端到端实测
+- [x] #14 CompositePriceSource 工厂切换 + 降级链（政府价优先 ∪ 电商兜底，匹配不到灰标「暂无可靠价」）
+- [x] #16 调度改为周更 (每周一 00:10) + 启动即首抓
+- [x] #19 /api/prices/latest 周环比 + 真实价标注
+- [x] #17 /api/prices/source 数据来源接口
+- [x] #20 前端来源标注（绿/橙颜色区分）+ 凭证链接 source_url 可点击核实 + 采价日期
+- [x] #18 端到端实测（含小米天价脏数据自愈：品类限定词 + >1000 阈值 + prune_bad_prices）
+- [ ] #12 PriceRecord.market_detail 列迁移（被 source_url 取代，功能已覆盖）
+- [x] **#15 回填历史价 → 已取消**：用户决策价格从启动日起真实记录，不再预填模拟历史（已删 90 天 mock 回填 + 清 7452 条模拟记录）
 
 ### Phase 3 — 智能化增强 (规划中)
 - [ ] LLM 对话式菜谱生成 ("冰箱里有X、想吃Y，帮我规划")
@@ -308,3 +308,6 @@ services:
 | ADR-3 | 菜价三源降级链 (政府/电商/模拟) | 真实价优先、电商兜底、静默估算 | 2026-07 |
 | ADR-4 | 电商抓取用慢慢买优先、京东淘宝兜底 | 慢慢买无登录墙、价格直出 | 2026-07 |
 | ADR-5 | 前端 Vant4 移动优先、PWA 而非原生 | 快速迭代、跨平台、离线可用 | 2026-07 |
+| ADR-6 | 成本估算仅信任政府指导价，电商参考价不进成本 | 电商多为整件/打包价、单位不可靠（如小米被搜成手机 ¥2327），防预算算爆 | 2026-07 |
+| ADR-7 | 价格从启动日真实记录，不预填历史模拟价 | 用户决策：真实数据即真实，造假历史无意义 | 2026-08 |
+| ADR-8 | 内置食谱全部下线，仅保留 HowToCook 第三方导入 | 内置 seed 数据不准确（如干煸豆角缺主料豆角），一切以导入为准 | 2026-08 |
